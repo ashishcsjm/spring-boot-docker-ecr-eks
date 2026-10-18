@@ -1,5 +1,4 @@
 # Docker EKS Demo Application
-
 A sample Spring Boot application with JDK 21 designed for Docker containerization and AWS EKS (Elastic Kubernetes Service) deployment.
 
 ## Features
