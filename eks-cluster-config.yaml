@@ -4,7 +4,7 @@ kind: ClusterConfig
 metadata:
   name: demo-eks-cluster
   region: eu-north-1
-  version: "1.30"
+  version: "1.31"
 
 # Managed node group - nodes go in PUBLIC subnets with public IPs
 # so they can reach the EKS control plane without needing a NAT gateway.
