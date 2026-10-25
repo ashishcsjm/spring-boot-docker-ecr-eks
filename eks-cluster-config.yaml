@@ -1,0 +1,31 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: demo-eks-cluster
+  region: eu-north-1
+  version: "1.30"
+
+# Managed node group - nodes go in PUBLIC subnets with public IPs
+# so they can reach the EKS control plane without needing a NAT gateway.
+# This keeps the demo simple and avoids networking failures.
+managedNodeGroups:
+  - name: demo-nodes
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 3
+    volumeSize: 20
+    # Place nodes in public subnets with public IPs (simpler for demos)
+    privateNetworking: false
+    # IAM policies the nodes need (ECR pull, CNI networking, worker node)
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+    ssh:
+      allow: false
+
+# NOTE: No `iam.withOIDC: true` here — OIDC is blocked by your org's SCP
+# and your Spring Boot app doesn't need it (it makes no AWS API calls).
