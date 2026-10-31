@@ -87,16 +87,18 @@ GET /actuator/health/readiness
 
 ## Environment Used in This Project
 
-| Item | Value |
+| Item | Example / Placeholder |
 |---|---|
-| AWS account | `566078794302` |
+| AWS account | `<AWS_ACCOUNT_ID>` — your own 12-digit account ID |
 | Region | `eu-north-1` |
-| ECR repository | `566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice` |
+| ECR repository | `<AWS_ACCOUNT_ID>.dkr.ecr.eu-north-1.amazonaws.com/demo-practice` |
 | Image tag | `1.0.0` |
-| EKS cluster | `thoughtful-bluegrass-otter` (created via AWS Console, EKS Auto Mode) |
-| Build/push host | EC2 instance with IAM role `DemoRole` |
+| EKS cluster | `<CLUSTER_NAME>` (created via AWS Console, EKS Auto Mode) |
+| Build/push host | EC2 instance with an IAM role (referred to below as `<IAM_ROLE_NAME>`) |
 
-> Replace these with your own account ID / region / repo / cluster where applicable.
+> **Note:** `<AWS_ACCOUNT_ID>`, `<CLUSTER_NAME>`, and `<IAM_ROLE_NAME>` are
+> placeholders — substitute your own values. Do not commit real account IDs,
+> ARNs, access keys, or other credentials to version control.
 
 ---
 
@@ -151,18 +153,18 @@ aws ecr create-repository --repository-name demo-practice --region eu-north-1
 ```bash
 aws ecr get-login-password --region eu-north-1 | \
   docker login --username AWS --password-stdin \
-  566078794302.dkr.ecr.eu-north-1.amazonaws.com
+  <AWS_ACCOUNT_ID>.dkr.ecr.eu-north-1.amazonaws.com
 ```
 
 ### Step 3. Tag the image for ECR
 ```bash
 docker tag docker-eks-demo:1.0.0 \
-  566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
+  <AWS_ACCOUNT_ID>.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
 ```
 
 ### Step 4. Push
 ```bash
-docker push 566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
+docker push <AWS_ACCOUNT_ID>.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
 ```
 
 Verify in the console: **ECR → Repositories → demo-practice → image tag `1.0.0`**.
@@ -178,7 +180,7 @@ Mode** (nodes are auto-provisioned when workloads need them).
 
 ### Step 1. Create the cluster (AWS Console)
 Console → **EKS → Create cluster**:
-- Name: `thoughtful-bluegrass-otter`
+- Name: `<CLUSTER_NAME>`
 - Kubernetes version: current
 - **EKS Auto Mode: Enabled** (auto-provisions compute — no manual node group needed)
 - Authentication mode: **EKS API** (access via Access Entries)
@@ -191,11 +193,11 @@ Console → **EKS → Create cluster**:
 
 ### Step 2. Wire kubectl to the cluster
 ```bash
-aws eks update-kubeconfig --name thoughtful-bluegrass-otter --region eu-north-1
+aws eks update-kubeconfig --name <CLUSTER_NAME> --region eu-north-1
 ```
 
 ### Step 3. Grant your IAM identity access (fixes `Unauthorized`)
-The cluster was created by your Console login; the EC2's `DemoRole` that `kubectl`
+The cluster was created by your Console login; the EC2's `<IAM_ROLE_NAME>` that `kubectl`
 uses needs its own **Access Entry**, or `kubectl` returns
 `You must be logged in to the server (Unauthorized)`.
 
@@ -205,19 +207,19 @@ aws sts get-caller-identity
 ```
 
 Create the access entry — **Console:** cluster → **Access** tab → **Create access
-entry** → principal `arn:aws:iam::566078794302:role/DemoRole`, type Standard →
+entry** → principal `arn:aws:iam::<AWS_ACCOUNT_ID>:role/<IAM_ROLE_NAME>`, type Standard →
 policy **AmazonEKSClusterAdminPolicy**, scope Cluster → Create.
 
 **CLI equivalent:**
 ```bash
 aws eks create-access-entry \
-  --cluster-name thoughtful-bluegrass-otter \
-  --principal-arn arn:aws:iam::566078794302:role/DemoRole \
+  --cluster-name <CLUSTER_NAME> \
+  --principal-arn arn:aws:iam::<AWS_ACCOUNT_ID>:role/<IAM_ROLE_NAME> \
   --type STANDARD --region eu-north-1
 
 aws eks associate-access-policy \
-  --cluster-name thoughtful-bluegrass-otter \
-  --principal-arn arn:aws:iam::566078794302:role/DemoRole \
+  --cluster-name <CLUSTER_NAME> \
+  --principal-arn arn:aws:iam::<AWS_ACCOUNT_ID>:role/<IAM_ROLE_NAME> \
   --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
   --access-scope type=cluster --region eu-north-1
 ```

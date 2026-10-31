@@ -69,7 +69,7 @@ spec:                      # DESIRED STATE
         app: docker-eks-demo   # MUST match selector + Service selector
     spec:
       containers:
-      - image: 566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
+      - image: <AWS_ACCOUNT_ID>.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
         ports: [8080]
         livenessProbe:  ...   # restart if unhealthy
         readinessProbe: ...   # remove from traffic if not ready
@@ -180,7 +180,7 @@ Key fields:
 Narrate chronologically from `kubectl apply`:
 
 1. **`kubectl apply -f k8s-deployment.yaml`** → kubectl sends the manifest to the **kube-apiserver**.
-2. **apiserver** authenticates the caller (via the EKS **Access Entry** for DemoRole), validates the YAML, and writes desired state (Deployment + Service) to **etcd**.
+2. **apiserver** authenticates the caller (via the EKS **Access Entry** for the caller's IAM role), validates the YAML, and writes desired state (Deployment + Service) to **etcd**.
 3. The **Deployment controller** sees a new Deployment → creates a **ReplicaSet**.
 4. The **ReplicaSet controller** sees "desired 2, current 0" → creates **2 Pod objects** (unscheduled).
 5. The **scheduler** evaluates nodes against `resources.requests` (256Mi / 250m) and **binds** each pod to a node. *(With EKS Auto Mode, if no node fits, a node is auto-provisioned here.)*
