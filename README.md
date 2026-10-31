@@ -1,14 +1,23 @@
 # Docker EKS Demo Application
-A sample Spring Boot application with JDK 21 designed for Docker containerization and AWS EKS (Elastic Kubernetes Service) deployment.
+
+A sample **Spring Boot (JDK 17)** application built to demonstrate the full container
+pipeline: **build → Docker → AWS ECR → AWS EKS**. It exposes one info API and
+Actuator health endpoints suitable for Kubernetes liveness/readiness probes.
+
+> 📘 See **[CONCEPTS-NOTES.md](./CONCEPTS-NOTES.md)** for Kubernetes/EKS concept
+> explanations, architecture diagrams, key `kubectl` commands, and interview Q&A.
+
+---
 
 ## Features
 
-- **Spring Boot 3.3.0** with JDK 21
-- **Health Endpoint** - Built-in health checks for Kubernetes probes
-- **Info Endpoint** - Display application information
-- **Actuator Endpoints** - Kubernetes-ready liveness and readiness probes
-- **Docker Ready** - Includes Dockerfile for containerization
-- **Kubernetes Ready** - Includes k8s-deployment.yaml for EKS deployment
+- **Spring Boot 3.3.0** on **JDK 17**
+- **Info Endpoint** (`/api/info`) — returns app metadata
+- **Actuator Health** (`/actuator/health`) — plus Kubernetes liveness/readiness probes
+- **Docker-ready** — `Dockerfile` + `docker-compose.yml`
+- **Kubernetes-ready** — `k8s-deployment.yaml` (Deployment + LoadBalancer Service)
+
+---
 
 ## Project Structure
 
@@ -17,203 +26,287 @@ docker-eks-demo/
 ├── src/
 │   ├── main/
 │   │   ├── java/com/example/
-│   │   │   ├── DockerEksDemoApplication.java
+│   │   │   ├── DockerEksDemoApplication.java   # @SpringBootApplication main
 │   │   │   └── controller/
-│   │   │       ├── InfoController.java
-│   │   │       └── InfoResponse.java
+│   │   │       ├── InfoController.java          # GET /api/info
+│   │   │       └── InfoResponse.java            # Lombok DTO
 │   │   └── resources/
-│   │       └── application.properties
+│   │       └── application.properties           # port 8080, actuator config
 │   └── test/
-├── pom.xml
-├── Dockerfile
+├── pom.xml                    # Java 17, Spring Boot 3.3.0
+├── Dockerfile                 # eclipse-temurin:17-jre
 ├── .dockerignore
-├── k8s-deployment.yaml
+├── docker-compose.yml         # local run with healthcheck
+├── k8s-deployment.yaml        # Deployment (2 replicas) + LoadBalancer Service
+├── eks-cluster-config.yaml    # eksctl cluster config (optional path)
+├── CONCEPTS-NOTES.md          # concepts + interview Q&A
 └── README.md
 ```
 
+---
+
 ## API Endpoints
-
-### Health Check
-```
-GET /actuator/health
-```
-Returns the application health status. This endpoint is used by Kubernetes for liveness and readiness probes.
-
-**Response:**
-```json
-{
-  "status": "UP"
-}
-```
 
 ### Application Info
 ```
 GET /api/info
 ```
-Returns information about the application.
-
-**Response:**
 ```json
 {
   "message": "Sample application for Docker and EKS test",
   "applicationName": "Docker EKS Demo Application",
   "version": "1.0.0",
   "description": "This is a demonstration Spring Boot application designed for Docker containerization and Kubernetes (EKS) deployment testing",
-  "javaVersion": "21.x.x",
-  "timestamp": 1234567890
+  "javaVersion": "17.x.x",
+  "timestamp": 1730000000000
 }
 ```
 
+### Health Check (used by Kubernetes probes)
+```
+GET /actuator/health
+GET /actuator/health/liveness
+GET /actuator/health/readiness
+```
+```json
+{ "status": "UP" }
+```
+
+---
+
 ## Prerequisites
 
-- Java 21 (JDK 21)
+- Java 17 (JDK 17)
 - Maven 3.6+
-- Docker (for containerization)
-- AWS CLI (for ECR push)
-- kubectl (for EKS deployment)
+- Docker
+- AWS CLI (configured; `aws sts get-caller-identity` works)
+- kubectl
+- (optional) eksctl
 
-## Build Instructions
+---
 
-### 1. Build the JAR file
+## Environment Used in This Project
+
+| Item | Value |
+|---|---|
+| AWS account | `566078794302` |
+| Region | `eu-north-1` |
+| ECR repository | `566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice` |
+| Image tag | `1.0.0` |
+| EKS cluster | `thoughtful-bluegrass-otter` (created via AWS Console, EKS Auto Mode) |
+| Build/push host | EC2 instance with IAM role `DemoRole` |
+
+> Replace these with your own account ID / region / repo / cluster where applicable.
+
+---
+
+# Part 1 — Run Spring Boot on Docker (local / EC2)
+
+### Step 1. Build the JAR
 ```bash
 mvn clean package
 ```
+Produces `target/docker-eks-demo-1.0.0.jar`.
 
-### 2. Build the Docker Image
+### Step 2. Build the Docker image
 ```bash
 docker build -t docker-eks-demo:1.0.0 .
 ```
 
-### 3. Test the Docker Image Locally
+### Step 3. Run the container
 ```bash
 docker run -p 8080:8080 docker-eks-demo:1.0.0
 ```
 
-Test the endpoints:
+### Step 4. Test the endpoints
 ```bash
-curl http://localhost:8080/actuator/health
 curl http://localhost:8080/api/info
+curl http://localhost:8080/actuator/health
 ```
 
-## AWS ECR Deployment
-
-### 1. Create an ECR Repository
+### (Alternative) Run with Docker Compose
 ```bash
-aws ecr create-repository \
-  --repository-name docker-eks-demo \
-  --region us-east-1
+docker compose up --build        # start (includes a container healthcheck)
+docker compose down              # stop
 ```
 
-### 2. Login to ECR
+> 💡 **Opening port 8080 from your own machine:** if testing against an EC2 host,
+> add an inbound rule to the EC2 security group allowing **TCP 8080** from your
+> public IP (`<your-ip>/32`), then browse `http://<ec2-public-ip>:8080/api/info`.
+
+---
+
+# Part 2 — Push the image to AWS ECR
+
+> All commands run on the build host (EC2). Use the **same user** for `docker login`
+> and `docker push` (e.g. both with `sudo`), and the **same region**, or you get
+> `no basic auth credentials`.
+
+### Step 1. (One-time) Create the ECR repository
 ```bash
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
+aws ecr create-repository --repository-name demo-practice --region eu-north-1
 ```
 
-### 3. Tag the Docker Image
+### Step 2. Authenticate Docker to ECR
+```bash
+aws ecr get-login-password --region eu-north-1 | \
+  docker login --username AWS --password-stdin \
+  566078794302.dkr.ecr.eu-north-1.amazonaws.com
+```
+
+### Step 3. Tag the image for ECR
 ```bash
 docker tag docker-eks-demo:1.0.0 \
-  <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/docker-eks-demo:1.0.0
+  566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
 ```
 
-### 4. Push to ECR
+### Step 4. Push
 ```bash
-docker push <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/docker-eks-demo:1.0.0
+docker push 566078794302.dkr.ecr.eu-north-1.amazonaws.com/demo-practice:1.0.0
 ```
 
-## AWS EKS Deployment
+Verify in the console: **ECR → Repositories → demo-practice → image tag `1.0.0`**.
 
-### 1. Update k8s-deployment.yaml
-Update the image URL in `k8s-deployment.yaml`:
-```yaml
-image: <AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/docker-eks-demo:1.0.0
+---
+
+# Part 3 — Deploy to AWS EKS
+
+EKS is a **managed** service: AWS runs the control plane (apiserver, etcd,
+scheduler). You create the cluster, wire `kubectl` to it, grant access, and apply
+your manifests. This project used an **AWS Console–created cluster with EKS Auto
+Mode** (nodes are auto-provisioned when workloads need them).
+
+### Step 1. Create the cluster (AWS Console)
+Console → **EKS → Create cluster**:
+- Name: `thoughtful-bluegrass-otter`
+- Kubernetes version: current
+- **EKS Auto Mode: Enabled** (auto-provisions compute — no manual node group needed)
+- Authentication mode: **EKS API** (access via Access Entries)
+- VPC: default VPC, **public subnets**
+- API server endpoint access: **Public** (allowlist `0.0.0.0/0` for a practice cluster)
+
+> Alternative (eksctl): `eksctl create cluster -f eks-cluster-config.yaml`
+> — in a locked-down org account this can fail (SCP blocking OIDC, nodes not
+> joining); the Console + Auto Mode path avoids that.
+
+### Step 2. Wire kubectl to the cluster
+```bash
+aws eks update-kubeconfig --name thoughtful-bluegrass-otter --region eu-north-1
 ```
 
-### 2. Deploy to EKS
+### Step 3. Grant your IAM identity access (fixes `Unauthorized`)
+The cluster was created by your Console login; the EC2's `DemoRole` that `kubectl`
+uses needs its own **Access Entry**, or `kubectl` returns
+`You must be logged in to the server (Unauthorized)`.
+
+Confirm the identity kubectl uses:
+```bash
+aws sts get-caller-identity
+```
+
+Create the access entry — **Console:** cluster → **Access** tab → **Create access
+entry** → principal `arn:aws:iam::566078794302:role/DemoRole`, type Standard →
+policy **AmazonEKSClusterAdminPolicy**, scope Cluster → Create.
+
+**CLI equivalent:**
+```bash
+aws eks create-access-entry \
+  --cluster-name thoughtful-bluegrass-otter \
+  --principal-arn arn:aws:iam::566078794302:role/DemoRole \
+  --type STANDARD --region eu-north-1
+
+aws eks associate-access-policy \
+  --cluster-name thoughtful-bluegrass-otter \
+  --principal-arn arn:aws:iam::566078794302:role/DemoRole \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+  --access-scope type=cluster --region eu-north-1
+```
+
+Verify:
+```bash
+kubectl get nodes
+```
+
+### Step 4. Deploy the application
+`k8s-deployment.yaml` already points at the ECR image. Apply it:
 ```bash
 kubectl apply -f k8s-deployment.yaml
 ```
 
-### 3. Verify Deployment
+Watch it come up (Auto Mode provisions a node in ~1–2 min):
 ```bash
-# Check deployment status
-kubectl get deployments
-kubectl get pods
-
-# Check service
-kubectl get services
-kubectl describe service docker-eks-demo-service
-
-# View logs
-kubectl logs -f deployment/docker-eks-demo
+kubectl get pods -w
+kubectl get deploy,rs,pods
 ```
+Each pod should reach `READY 1/1`, `STATUS Running`.
 
-### 4. Access the Application
+### Step 5. Get the LoadBalancer URL and access the app
 ```bash
-# Get external IP
-kubectl get service docker-eks-demo-service
-
-# Test the endpoints
-curl http://<EXTERNAL_IP>/api/info
-curl http://<EXTERNAL_IP>/actuator/health
+kubectl get svc docker-eks-demo-service
 ```
+Read the **`EXTERNAL-IP`** column (an AWS ELB hostname like
+`a1b2...elb.eu-north-1.amazonaws.com`; wait if it shows `<pending>`).
 
-## Local Development
+The Service exposes port **80** → container **8080**, so use plain HTTP:
+```bash
+curl http://<EXTERNAL-HOSTNAME>/api/info
+curl http://<EXTERNAL-HOSTNAME>/actuator/health
+```
+Or open `http://<EXTERNAL-HOSTNAME>/api/info` in a browser.
 
-### Run the application locally
+> ⏱️ The ELB hostname can take 2–3 minutes to become DNS-resolvable after creation.
+
+---
+
+## Kubernetes Configuration Reference
+
+**Probes** (`k8s-deployment.yaml`):
+- **Liveness** `/actuator/health/liveness` → restart container if it fails.
+- **Readiness** `/actuator/health/readiness` → remove from Service traffic if not ready.
+
+**Resources per pod:**
+- Requests: 256Mi RAM, 250m CPU
+- Limits: 512Mi RAM, 500m CPU
+
+**Service:** `type: LoadBalancer`, port 80 → targetPort 8080.
+
+---
+
+## Local Development (no Docker)
 ```bash
 mvn spring-boot:run
+# → http://localhost:8080/api/info
 ```
 
-The application will start on `http://localhost:8080`
+---
 
-### Test the endpoints
+## Troubleshooting (issues actually hit in this project)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `docker build` COPY jar fails | `target/` was in `.dockerignore` | Remove `target/` from `.dockerignore`, run `mvn clean package` first |
+| `release version 21 not supported` | JDK 21 not on build host | Project set to Java 17 (pom.xml + Dockerfile) |
+| `no basic auth credentials` on push | login/push user or region mismatch | Same user (both `sudo`) + same region for login and push |
+| kubectl `no such host` | Stale kubeconfig to old cluster | `aws eks update-kubeconfig --name <cluster> --region eu-north-1` |
+| kubectl `i/o timeout` to `172.31.x.x:443` | Private endpoint + SG blocks 443 | Enable Public endpoint access, or open 443 on the cluster security group |
+| `You must be logged in (Unauthorized)` | IAM role has no EKS Access Entry | Create Access Entry for the role (Step 3 above) |
+| Pod `Pending` | No node fits | Auto Mode provisions one; or add a node group |
+| `ImagePullBackOff` | Node role lacks ECR pull | Attach `AmazonEC2ContainerRegistryReadOnly` to node role |
+| Service `EXTERNAL-IP <pending>` | ELB still provisioning | Wait; check subnet tags / LB controller |
+
+---
+
+## Cleanup
 ```bash
-curl http://localhost:8080/actuator/health
-curl http://localhost:8080/api/info
+kubectl delete -f k8s-deployment.yaml          # remove app + LoadBalancer
+# then delete the EKS cluster from the Console (or: eksctl delete cluster ...)
 ```
 
-## Kubernetes Probes Configuration
-
-The deployment includes:
-- **Liveness Probe**: Checks if the application is running (`/actuator/health/liveness`)
-- **Readiness Probe**: Checks if the application is ready to accept traffic (`/actuator/health/readiness`)
-
-Both probes are configured with appropriate timeouts and failure thresholds for production use.
-
-## Resource Limits
-
-The Kubernetes deployment specifies:
-- **Requests**: 256Mi RAM, 250m CPU
-- **Limits**: 512Mi RAM, 500m CPU
-
-Adjust these values based on your load testing and requirements.
-
-## Notes
-
-- The application uses Java 21 with G1GC garbage collector configuration
-- Actuator endpoints are exposed for monitoring and health checks
-- The Docker image uses Eclipse Temurin's official JDK 21 image
-- All timestamps and IDs are automatically tracked and logged
-
-## Troubleshooting
-
-### Docker build fails
-- Ensure you have run `mvn clean package` first
-- Check that the JAR file exists in `target/` directory
-
-### Kubernetes pod not starting
-- Check pod logs: `kubectl logs <pod-name>`
-- Verify the image exists in ECR and credentials are configured
-- Check resource availability on the cluster
-
-### Health check endpoints returning errors
-- Verify the pod is in Running state: `kubectl get pods`
-- Check application logs for errors
+---
 
 ## References
-
-- [Spring Boot Documentation](https://spring.io/projects/spring-boot)
-- [Docker Documentation](https://docs.docker.com/)
-- [AWS EKS Documentation](https://docs.aws.amazon.com/eks/)
-- [Kubernetes Documentation](https://kubernetes.io/docs/)
+- [Spring Boot](https://spring.io/projects/spring-boot)
+- [Docker](https://docs.docker.com/)
+- [AWS ECR](https://docs.aws.amazon.com/ecr/)
+- [AWS EKS](https://docs.aws.amazon.com/eks/)
+- [Kubernetes](https://kubernetes.io/docs/)
